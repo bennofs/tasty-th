@@ -27,9 +27,10 @@ shouldIncludeByPrefix :: String -> String -> Maybe String
 shouldIncludeByPrefix p t = if p `isPrefixOf` t then Just $ fixName t else Nothing
 
 makeTest :: String -> String -> Q Exp
-makeTest f n = [| $fE n |]
-  where
-    fE = return $ VarE $ mkName f
+makeTest functionName testName = do
+  mv <- lookupValueName functionName
+  v <- maybe (fail $ show functionName ++ " not found") (return . VarE) mv
+  return $ AppE v (LitE $ StringL testName)
 
 class TastyGroupable a where
   toTestTree :: String -> a -> IO TestTree
@@ -51,6 +52,7 @@ instance TastyGroupable [IO TestTree] where
   toTestTree n = toTestTree n . sequenceA
 -- |Matches top-level definitions that have a prefix "Mase_"
 -- |Creates a TestTree with Test.Tasty.HUnit.testCase
+
 hunitVariety :: TestVariety
 hunitVariety = TestVariety {
     shouldIncludeTest = shouldIncludeByPrefix "case_"
@@ -60,7 +62,7 @@ hunitVariety = TestVariety {
 quickCheckVariety :: TestVariety
 quickCheckVariety = TestVariety {
     shouldIncludeTest = (<|>) <$> shouldIncludeByPrefix "prop_" <*> shouldIncludeByPrefix "qcprop_"
-  , makeTestE = \n ->  [| return' . $(makeTest "testProperty" n) |]
+  , makeTestE = \n ->  [| return' . $(makeTest "Test.Tasty.QuickCheck.testProperty" n) |]
 }
 
 testVariety :: TestVariety
