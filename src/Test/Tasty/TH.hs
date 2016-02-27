@@ -27,14 +27,27 @@ module Test.Tasty.TH
   , locationModule
   ) where
 
-import Control.Monad (join)
-import Control.Applicative
-import Language.Haskell.TH
-import Data.List
-import Data.Maybe
+import           Control.Applicative
+import           Control.Monad            (join)
+import           Data.List
+import           Data.Maybe
+import           Language.Haskell.TH
 
-import Test.Tasty
-import Prelude
+import           Prelude
+import           Test.Tasty
+
+import           Test.Tasty.TestVarieties
+
+
+type Test = String
+
+data Args = Args {
+  testVarieties :: [TestVariety]
+}
+
+defaultArgs = Args {
+  testVarieties = defaultTestVarieties
+}
 
 -- | Convenience function that directly generates an `IO` action that may be used as the
 -- main function. It's just a wrapper that applies 'defaultMain' to the 'TestTree' generated
@@ -49,9 +62,12 @@ import Prelude
 -- main = $('defaultMainGenerator')
 -- @
 defaultMainGenerator :: ExpQ
-defaultMainGenerator = [| defaultMain $(testGroupGenerator) |]
+defaultMainGenerator = defaultMainGenerator' defaultArgs
 
--- | This function generates a 'TestTree' from functions in the current module. 
+defaultMainGenerator' :: Args -> ExpQ
+defaultMainGenerator' args = [| $(testGroupGenerator' args) >>= defaultMain  |]
+
+-- | This function generates a 'TestTree' from functions in the current module.
 -- The test tree is named after the current module.
 --
 -- The following definitions are collected by `testGroupGenerator`:
@@ -70,17 +86,23 @@ defaultMainGenerator = [| defaultMain $(testGroupGenerator) |]
 -- tests = $('testGroupGenerator')
 -- @
 testGroupGenerator :: ExpQ
-testGroupGenerator = join $ testGroupGeneratorFor <$> fmap loc_module location <*> testFunctions
+testGroupGenerator = testGroupGenerator' defaultArgs
+
+testGroupGenerator' :: Args -> ExpQ
+testGroupGenerator' args = join $ testGroupGeneratorFor' args <$> fmap loc_module location <*> testFunctions
+
  where
   testFunctions = location >>= runIO . extractTestFunctions . loc_filename
 
 -- | Retrieves all function names from the given file that would be discovered by 'testGroupGenerator'.
 extractTestFunctions :: FilePath -> IO [String]
-extractTestFunctions filePath = do
+extractTestFunctions = extractTestFunctions' defaultArgs
+
+extractTestFunctions' :: Args -> FilePath -> IO [String]
+extractTestFunctions' args filePath = do
   file <- readFile filePath
   let functions = map fst . concatMap lex . lines $ file
-      filtered pat = filter (pat `isPrefixOf`) functions
-  return . nub $ concat [filtered "prop_", filtered "case_", filtered "test_"]
+  return . nub $ mapMaybe (\t -> getVarietyForTest (testVarieties args) t >> return t) functions
 
 -- | Extract the name of the current module.
 locationModule :: ExpQ
@@ -94,13 +116,21 @@ testGroupGeneratorFor
   :: String   -- ^ The name of the test group itself
   -> [String] -- ^ The names of the functions which should be included in the test group
   -> ExpQ
-testGroupGeneratorFor name functionNames = [| testGroup name $(listE (mapMaybe test functionNames)) |]
+testGroupGeneratorFor = testGroupGeneratorFor' defaultArgs
+
+testGroupGeneratorFor'
+  :: Args
+  -> String   -- ^ The name of the test group itself
+  -> [String] -- ^ The names of the functions which should be included in the test group
+  -> ExpQ
+testGroupGeneratorFor' args name functionNames = [| testGroup name <$> sequenceA $(listE (mapMaybe test functionNames)) |]
  where
-  testFunctions = [("prop_", "testProperty"), ("case_", "testCase"), ("test_", "testGroup")]
-  getTestFunction fname = snd <$> find ((`isPrefixOf` fname) . fst) testFunctions
   test fname = do
-    fn <- getTestFunction fname
-    return $ appE (appE (varE $ mkName fn) (stringE (fixName fname))) (varE (mkName fname))
+    v <- getVarietyForTest (testVarieties args) fname
+    testName <- shouldIncludeTest v fname
+    let makeTestFuncE = makeTestE v testName
+        testFuncE = return $ VarE $ mkName fname
+    return [| $makeTestFuncE $testFuncE|]
 
 -- | Like 'defaultMainGenerator', but only includes the specific function names in the test group.
 -- The function names still need to follow the pattern of starting with one of @prop_@, @case_@ or @test_@.
@@ -108,10 +138,11 @@ defaultMainGeneratorFor
   :: String   -- ^ The name of the top-level test group
   -> [String] -- ^ The names of the functions which should be included in the test group
   -> ExpQ
-defaultMainGeneratorFor name fns = [| defaultMain $(testGroupGeneratorFor name fns) |]
+defaultMainGeneratorFor = defaultMainGeneratorFor' defaultArgs
 
-fixName :: String -> String
-fixName = replace '_' ' ' . tail . dropWhile (/= '_')
-
-replace :: Eq a => a -> a -> [a] -> [a]
-replace b v = map (\i -> if b == i then v else i)
+defaultMainGeneratorFor'
+  :: Args
+  -> String   -- ^ The name of the top-level test group
+  -> [String] -- ^ The names of the functions which should be included in the test group
+  -> ExpQ
+defaultMainGeneratorFor' args name fns = [| $(testGroupGeneratorFor' args name fns) >>= defaultMain |]
