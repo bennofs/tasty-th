@@ -5,3 +5,4 @@ dist
 *.o
 *.dyn_o
 *.dyn_hi
+.stack-work
