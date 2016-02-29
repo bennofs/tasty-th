@@ -1,0 +1,7 @@
+Before pull request:
+✔  refactor testGroupGeneratorFor' to use TastyGroupable @done(2016-02-28 22:55)
+☐  Refactor varieties: predicate out of TestVariety and move name into a parameter for the splice @timestamp(2016-02-28 22:56)
+☐  Create test file for new test types and all TastyGroupable instances
+☐  Haddock comments @Haddock
+☐  Pull request
+☐  Remove examples

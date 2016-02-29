@@ -39,16 +39,17 @@ import           Test.Tasty
 import           Test.Tasty.TestVarieties
 
 
-type Test = String
-
+-- #TODO:0 @Haddock
 data Args = Args {
-  testVarieties :: [TestVariety]
+  testVarieties :: TestVarietiesAssocList
 }
 
+-- #TODO:10 @Haddock
 defaultArgs = Args {
   testVarieties = defaultTestVarieties
 }
 
+-- #TODO:20 @Haddock
 -- | Convenience function that directly generates an `IO` action that may be used as the
 -- main function. It's just a wrapper that applies 'defaultMain' to the 'TestTree' generated
 -- by 'testGroupGenerator'.
@@ -64,6 +65,7 @@ defaultArgs = Args {
 defaultMainGenerator :: ExpQ
 defaultMainGenerator = defaultMainGenerator' defaultArgs
 
+-- #TODO:30 @Haddock
 defaultMainGenerator' :: Args -> ExpQ
 defaultMainGenerator' args = [| $(testGroupGenerator' args) >>= defaultMain  |]
 
@@ -123,14 +125,11 @@ testGroupGeneratorFor'
   -> String   -- ^ The name of the test group itself
   -> [String] -- ^ The names of the functions which should be included in the test group
   -> ExpQ
-testGroupGeneratorFor' args name functionNames = [| testGroup name <$> sequenceA $(listE (mapMaybe test functionNames)) |]
+testGroupGeneratorFor' args name functionNames = [| toTestTree name $(listE (mapMaybe test functionNames)) |]
  where
   test fname = do
     v <- getVarietyForTest (testVarieties args) fname
-    testName <- shouldIncludeTest v fname
-    let makeTestFuncE = makeTestE v testName
-        testFuncE = return $ VarE $ mkName fname
-    return [| $makeTestFuncE $testFuncE|]
+    return $ join $ either fail return <$> v fname
 
 -- | Like 'defaultMainGenerator', but only includes the specific function names in the test group.
 -- The function names still need to follow the pattern of starting with one of @prop_@, @case_@ or @test_@.
