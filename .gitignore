@@ -6,3 +6,4 @@ dist
 *.dyn_o
 *.dyn_hi
 .stack-work
+TaskList.todo

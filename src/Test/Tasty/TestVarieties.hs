@@ -53,21 +53,11 @@ class TastyGroupable a where
 instance TastyGroupable TestTree where
   toTestTree _ = return
 
+instance TastyGroupable a => TastyGroupable (IO a) where
+    toTestTree n = (>>= toTestTree n)
 
-instance Foldable f => TastyGroupable (f TestTree) where
-  toTestTree n ts = return $ testGroup n $ toList ts
-
-instance TastyGroupable (IO TestTree) where
-  toTestTree _ = id
-
-
-instance Foldable f => TastyGroupable (IO (f TestTree)) where
-  toTestTree n iots = testGroup n . toList <$> iots
-
-instance Traversable t =>  TastyGroupable (t (IO TestTree)) where
-  toTestTree n = toTestTree n . sequenceA
--- |Matches top-level definitions that have a prefix "Mase_"
--- |Creates a TestTree with Test.Tasty.HUnit.testCase
+instance TastyGroupable a => TastyGroupable [a] where
+  toTestTree n ts = testGroup n <$> traverse (toTestTree "") ts
 
 hunitVariety :: TestVariety
 hunitVariety = makeTestSplice [
