@@ -20,9 +20,17 @@
 -- functions at the end of the file, or you may get errors due to missing definitions.
 module Test.Tasty.TH
   ( testGroupGenerator
+  , testGroupGenerator'
+  , testGroupGeneratorIO
+  , testGroupGeneratorIO'
   , defaultMainGenerator
+  , defaultMainGenerator'
   , testGroupGeneratorFor
+  , testGroupGeneratorFor'
+  , testGroupGeneratorForIO
+  , testGroupGeneratorForIO'
   , defaultMainGeneratorFor
+  , defaultMainGeneratorFor'
   , extractTestFunctions
   , locationModule
   ) where
@@ -67,7 +75,7 @@ defaultMainGenerator = defaultMainGenerator' defaultArgs
 
 -- #TODO:30 @Haddock
 defaultMainGenerator' :: Args -> ExpQ
-defaultMainGenerator' args = [| $(testGroupGenerator' args) >>= defaultMain  |]
+defaultMainGenerator' args = [| $(testGroupGeneratorIO' args) >>= defaultMain  |]
 
 -- | This function generates a 'TestTree' from functions in the current module.
 -- The test tree is named after the current module.
@@ -90,11 +98,19 @@ defaultMainGenerator' args = [| $(testGroupGenerator' args) >>= defaultMain  |]
 testGroupGenerator :: ExpQ
 testGroupGenerator = testGroupGenerator' defaultArgs
 
-testGroupGenerator' :: Args -> ExpQ
-testGroupGenerator' args = join $ testGroupGeneratorFor' args <$> fmap loc_module location <*> testFunctions
+testGroupGeneratorIO :: ExpQ
+testGroupGeneratorIO = testGroupGeneratorIO' defaultArgs
 
+internalTestGroupGenerator :: (String -> [String] -> ExpQ) -> ExpQ
+internalTestGroupGenerator f = join $ f <$> fmap loc_module location <*> testFunctions
  where
   testFunctions = location >>= runIO . extractTestFunctions . loc_filename
+
+testGroupGenerator' :: Args -> ExpQ
+testGroupGenerator' args = internalTestGroupGenerator $ testGroupGeneratorFor' args
+
+testGroupGeneratorIO' :: Args -> ExpQ
+testGroupGeneratorIO' args = internalTestGroupGenerator $  testGroupGeneratorForIO' args
 
 -- | Retrieves all function names from the given file that would be discovered by 'testGroupGenerator'.
 extractTestFunctions :: FilePath -> IO [String]
@@ -120,16 +136,33 @@ testGroupGeneratorFor
   -> ExpQ
 testGroupGeneratorFor = testGroupGeneratorFor' defaultArgs
 
+testGroupGeneratorForIO
+  :: String   -- ^ The name of the test group itself
+  -> [String] -- ^ The names of the functions which should be included in the test group
+  -> ExpQ
+testGroupGeneratorForIO = testGroupGeneratorForIO' defaultArgs
+
+testGroupGeneratorForIO'
+  :: Args
+  -> String   -- ^ The name of the test group itself
+  -> [String] -- ^ The names of the functions which should be included in the test group
+  -> ExpQ
+testGroupGeneratorForIO' args name functionNames = [| toTestTree name $(listE (mapMaybe test functionNames)) |]
+  where
+    test fname = do
+    v <- getVarietyForTest (testVarieties args) fname
+    return $ join $ either (fail . show) return <$> v fname IOTestTreeMode
+
 testGroupGeneratorFor'
   :: Args
   -> String   -- ^ The name of the test group itself
   -> [String] -- ^ The names of the functions which should be included in the test group
   -> ExpQ
-testGroupGeneratorFor' args name functionNames = [| toTestTree name $(listE (mapMaybe test functionNames)) |]
+testGroupGeneratorFor' args name functionNames = [| testGroup name $(listE (mapMaybe test functionNames)) |]
  where
   test fname = do
     v <- getVarietyForTest (testVarieties args) fname
-    return $ join $ either fail return <$> v fname
+    return $ join $ either (fail . show) return <$> (v fname TestTreeMode)
 
 -- | Like 'defaultMainGenerator', but only includes the specific function names in the test group.
 -- The function names still need to follow the pattern of starting with one of @prop_@, @case_@ or @test_@.
@@ -144,4 +177,4 @@ defaultMainGeneratorFor'
   -> String   -- ^ The name of the top-level test group
   -> [String] -- ^ The names of the functions which should be included in the test group
   -> ExpQ
-defaultMainGeneratorFor' args name fns = [| $(testGroupGeneratorFor' args name fns) >>= defaultMain |]
+defaultMainGeneratorFor' args name fns = [| $(testGroupGeneratorForIO' args name fns) >>= defaultMain |]

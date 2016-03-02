@@ -14,16 +14,16 @@ import           Language.Haskell.TH
 import           Test.Tasty
 
 
-type TestVariety = String -> Q (Either String Exp)
+data TestVarietySpliceError =
+    MakeTestFunctionNotInScope [String]
+  | TestFunctionNotInScope String
+  | TestFunctionRequiresIO String
+  deriving (Eq, Show)
 
+data TestTreeSpliceMode = TestTreeMode | IOTestTreeMode deriving(Eq, Show)
+
+type TestVariety = String -> TestTreeSpliceMode -> Q (Either [TestVarietySpliceError] Exp)
 type TestVarietiesAssocList = [(String, TestVariety)]
---data TestVariety = TestVariety {
---    shouldIncludeTest :: String -> Maybe String -- | given a top-level definition, returns `Nothing` if the definition should be excluded and `Just name` to include a test and name it
---  , makeTestE         :: String -> Q Exp -- | give a test, returns  a a splice that generates a function of Type `a -> IO TestTree`. This function will be applied to top-level definitions that are accepted by shouldIncludeTest `
---}
-
---return' :: a -> IO a
---return' = return
 
 fixName :: String -> String
 fixName = replace '_' ' ' . tail . dropWhile (/= '_')
@@ -34,18 +34,28 @@ replace b v = map (\i -> if b == i then v else i)
 --shouldIncludeByPrefix :: String -> String -> Maybe String
 --shouldIncludeByPrefix p t = if p `isPrefixOf` t then Just $ fixName t else Nothing
 
-makeTestSplice :: [String] -> TestVariety
-makeTestSplice makeTestFunctions fname = do
+testVarietyFromMakeTestFunctions :: [String] -> TestVariety
+testVarietyFromMakeTestFunctions makeTestFunctions fname mode = do
   maybeCreateTestName <- getFirst . foldMap First <$> traverse lookupValueName makeTestFunctions
   maybeTestFunName <- lookupValueName fname
-  let makeTestFunctionsError = "None of the following functions are in scope: " ++ show makeTestFunctions
-      testFunError = "Function for test \"" ++ fname ++ "\" not in scope"
-      createTestName = maybe (Left makeTestFunctionsError) (Right . VarE) maybeCreateTestName
-      testFunName = maybe (Left testFunError) (Right . VarE) maybeTestFunName
+  let createTestName = maybe (Left $ MakeTestFunctionNotInScope makeTestFunctions)
+                             (Right . VarE)
+                             maybeCreateTestName
+      testFunName = maybe (Left $ TestFunctionNotInScope fname)
+                          (Right . VarE)
+                          maybeTestFunName
       (errors, ~(ct : tf : _)) = partitionEithers [createTestName, testFunName]
+      resultSplice = [| $(return ct) (fixName fname) $(return tf) |]
+      resultSplice' = if mode == IOTestTreeMode then [|toTestTree "" $resultSplice |] else resultSplice
   if null errors
-    then return <$> [| toTestTree "" $ $(return ct) (fixName fname) $(return tf) |]
-    else return . Left . unlines $ errors
+    then return <$> resultSplice'
+    else return $ Left errors
+
+mustBeInIO :: TestVariety -> TestVariety
+mustBeInIO v fname mode =
+  if mode /= IOTestTreeMode
+  then return $ Left [TestFunctionRequiresIO fname]
+  else v fname mode
 
 class TastyGroupable a where
   toTestTree :: String -> a -> IO TestTree
@@ -60,7 +70,7 @@ instance TastyGroupable a => TastyGroupable [a] where
   toTestTree n ts = testGroup n <$> traverse (toTestTree "") ts
 
 hunitVariety :: TestVariety
-hunitVariety = makeTestSplice [
+hunitVariety = testVarietyFromMakeTestFunctions [
     "Test.Tasty.Hunit.testCase"
   , "Hunit.testCase"
   , "hunitTestCase"
@@ -74,7 +84,7 @@ hunitVariety = makeTestSplice [
 }-}
 
 quickCheckVariety :: TestVariety
-quickCheckVariety = makeTestSplice [
+quickCheckVariety = testVarietyFromMakeTestFunctions [
     "Test.Tasty.QuickCheck.testProperty"
   , "TQC.testProperty"
   , "quickCheckTestProperty"
@@ -88,10 +98,14 @@ quickCheckVariety = makeTestSplice [
 }-}
 
 testVariety :: TestVariety
-testVariety fname =  do
+testVariety fname mode =  do
   testFunName <- lookupValueName fname
-  maybe (return . Left $ "Function for test \"" ++ fname ++ "\" not in scope")
-        (\n -> Right <$> [|toTestTree (fixName fname) $(return $ VarE n)|])
+  let makeTestFunction =
+        case mode of
+          TestTreeMode -> [|testGroup|]
+          IOTestTreeMode -> [|toTestTree|]
+  maybe (return $ Left [TestFunctionNotInScope fname])
+        (\n -> Right <$> [|$makeTestFunction (fixName fname) $(return $ VarE n)|])
         testFunName
 {-TestVariety {
     shouldIncludeTest = shouldIncludeByPrefix "test_"
@@ -99,7 +113,7 @@ testVariety fname =  do
 }-}
 
 specVariety :: TestVariety
-specVariety = makeTestSplice [
+specVariety = mustBeInIO $ testVarietyFromMakeTestFunctions [
     "Test.Tasty.HSpec.testSpec"
   , "THS.testSpec"
   , "HS.testSpec"
