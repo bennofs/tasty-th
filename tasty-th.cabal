@@ -1,6 +1,6 @@
 name: tasty-th
 version: 0.1.4
-cabal-version: >= 1.6
+cabal-version: >= 1.8
 build-type: Simple
 license: BSD3
 license-file: BSD3.txt
@@ -13,10 +13,28 @@ category: Testing
 author: Oscar Finnsson & Emil Nordling & Benno Fünfstück
 
 library
-  exposed-modules: Test.Tasty.TH
+  exposed-modules: Test.Tasty.TH, Test.Tasty.TestVarieties
   build-depends: base >= 4 && < 5, tasty, template-haskell
   hs-source-dirs: src
   other-extensions: TemplateHaskell
+
+
+test-suite spec
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  hs-source-dirs:
+      test
+  ghc-options: -Wall
+  build-depends:
+      base >= 4.7 && < 5
+    , tasty
+    , tasty-th
+    , tasty-quickcheck
+    , tasty-smallcheck
+    , tasty-hunit
+    , tasty-hspec
+    , tasty-golden
+  other-modules:
 
 source-repository head
   type:     git
